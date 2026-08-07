@@ -18,6 +18,7 @@ export default Plugin.define({
             delivery: Schema.Literals(["steer", "queue"]),
           }),
           output: Schema.String,
+          options: { codemode: false },
           execute: ({ to, content, delivery }, { sessionID }) =>
             ctx.session
               .synthetic({
