@@ -86,12 +86,13 @@ export default Plugin.define({
             readRoster.pipe(
               Effect.flatMap((roster) => {
                 const target = roster[to]?.id ?? (to as Session.ID)
-                const sender = Object.entries(roster).find(([, e]) => e.id === sessionID)?.[0] ?? sessionID
+                const senderName = Object.entries(roster).find(([, e]) => e.id === sessionID)?.[0]
+                const sender = senderName ? `${senderName}-${sessionID.slice(0, 12)}…` : sessionID
                 return ctx.session
                   .prompt({
                     sessionID: target,
                     text: `[DM from ${sender}] ${content}`,
-                    metadata: { from: sessionID, fromName: sender },
+                    metadata: { from: sessionID, fromName: senderName ?? sessionID },
                     delivery,
                   })
                   .pipe(
