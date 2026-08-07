@@ -38,13 +38,16 @@ export default Plugin.define({
     Effect.gen(function* () {
       yield* ctx.session.hook("context", (event) => {
         const last = event.messages.at(-1)
-        const isDm = last?.role === "user" && last.metadata?.dm_reply === true
+        const meta = last?.role === "user" ? last.metadata : undefined
+        const isDm = meta?.dm === true && typeof meta.from === "string"
         if (isDm) {
-          const from = typeof last.metadata?.from === "string" ? last.metadata.from : null
-          const fromName = typeof last.metadata?.fromName === "string" ? last.metadata.fromName : "the sender"
+          const from = String(meta.from)
+          const fromName = typeof meta.fromName === "string" ? meta.fromName : from
+          const type = typeof meta.message_type === "string" ? meta.message_type : "task"
+          const thread = typeof meta.thread_id === "string" ? meta.thread_id : null
           event.system.push({
             type: "text",
-            text: `You just received a DM from "${fromName}"${from ? ` (session ${from})` : ""}. You MUST reply to the sender as a DM: call the dm tool with to: "${from}", content: <your reply>, delivery: "steer", dm_reply: false. Do NOT merely answer in this session — the reply must go back to the sender via the dm tool. Reply once and then stop.`,
+            text: `You just received a DM from "${fromName}" (session ${from}, type: ${type}${thread ? `, thread: ${thread}` : ""}). Acknowledge it briefly, act on it if it is addressed to you, and reply using the dm tool if a reply is expected — questions and tasks expect a reply, status messages do not. When replying, reuse thread_id "${thread}" if present and set delivery "steer". You do not need to wait for replies to your own DMs — continue your work.`,
           } satisfies SystemPart)
         }
         return Effect.succeed(void 0)
@@ -91,16 +94,18 @@ export default Plugin.define({
         tools.add({
           name: "dm",
           description:
-            "DM another session by registered name or raw session ID. delivery: steer = interrupt the receiver now, queue = deliver on its next turn. dm_reply: true = the receiver must autonomously reply to you as a DM, false = no reply expected.",
+            "DM another session by registered name or raw session ID. delivery: steer = interrupt the receiver now, queue = deliver on its next turn. message_type: task, question, status, or review — the receiver decides whether to reply. thread_id groups a conversation (max 64 chars). priority: urgent, normal, or low.",
           input: Schema.Struct({
             to: Schema.String,
             content: Schema.String,
             delivery: Schema.Literals(["steer", "queue"]),
-            dm_reply: Schema.Boolean,
+            message_type: Schema.optional(Schema.Literals(["task", "question", "status", "review"])),
+            thread_id: Schema.optional(Schema.String),
+            priority: Schema.optional(Schema.Literals(["urgent", "normal", "low"])),
           }),
           output: Schema.String,
           options: { codemode: false },
-          execute: ({ to, content, delivery, dm_reply }, { sessionID }) =>
+          execute: ({ to, content, delivery, message_type, thread_id, priority }, { sessionID }) =>
             readRoster.pipe(
               Effect.flatMap((roster) => {
                 const target = roster[to]?.id ?? (to as Session.ID)
@@ -110,13 +115,20 @@ export default Plugin.define({
                   .prompt({
                     sessionID: target,
                     text: `${DM_PREFIX}${sender}] ${content}`,
-                    metadata: { from: sessionID, fromName: senderName ?? sessionID, dm_reply },
+                    metadata: {
+                      from: sessionID,
+                      fromName: senderName ?? sessionID,
+                      dm: true,
+                      ...(message_type ? { message_type } : {}),
+                      ...(thread_id ? { thread_id } : {}),
+                      ...(priority ? { priority } : {}),
+                    },
                     delivery,
                   })
                   .pipe(
                     Effect.map(() => ({
                       output: "delivered",
-                      content: `delivered to ${to} (${delivery}, dm_reply: ${dm_reply})`,
+                      content: `delivered to ${to} (${delivery})`,
                     })),
                   )
               }),
