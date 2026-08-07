@@ -1,0 +1,15 @@
+{
+  "name": "opendm",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": "./src/dm.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "next",
+    "@opencode-ai/schema": "next",
+    "effect": "4.0.0-beta.101"
+  }
+}
