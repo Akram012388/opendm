@@ -87,7 +87,7 @@ export default Plugin.define({
               Effect.flatMap((roster) => {
                 const target = roster[to]?.id ?? (to as Session.ID)
                 return ctx.session
-                  .synthetic({
+                  .prompt({
                     sessionID: target,
                     text: `[DM from ${sessionID}] ${content}`,
                     metadata: { from: sessionID },
