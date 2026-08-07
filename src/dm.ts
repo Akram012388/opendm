@@ -1,6 +1,7 @@
 import { Plugin } from "@opencode-ai/plugin/effect"
 import { Session } from "@opencode-ai/schema/session"
 import { Tool } from "@opencode-ai/schema/tool"
+import type { SystemPart } from "@opencode-ai/ai"
 import { Effect, Schema } from "effect"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
@@ -29,10 +30,26 @@ const writeRoster = (roster: Roster) =>
 
 const toolError = (message: string) => new Tool.Error({ message })
 
+const DM_PREFIX = "[DM from "
+
 export default Plugin.define({
   id: "dm",
   effect: (ctx) =>
     Effect.gen(function* () {
+      yield* ctx.session.hook("context", (event) => {
+        const last = event.messages.at(-1)
+        const isDm = last?.role === "user" && last.metadata?.dm_reply === true
+        if (isDm) {
+          const from = typeof last.metadata?.from === "string" ? last.metadata.from : null
+          const fromName = typeof last.metadata?.fromName === "string" ? last.metadata.fromName : "the sender"
+          event.system.push({
+            type: "text",
+            text: `You just received a DM from "${fromName}"${from ? ` (session ${from})` : ""}. You MUST reply to the sender as a DM: call the dm tool with to: "${from}", content: <your reply>, delivery: "steer", dm_reply: false. Do NOT merely answer in this session — the reply must go back to the sender via the dm tool. Reply once and then stop.`,
+          } satisfies SystemPart)
+        }
+        return Effect.succeed(void 0)
+      })
+
       yield* ctx.tool.transform((tools) => {
         tools.add({
           name: "register",
@@ -74,15 +91,16 @@ export default Plugin.define({
         tools.add({
           name: "dm",
           description:
-            "DM another session by registered name or raw session ID. steer = interrupt the receiver now; queue = deliver on its next turn.",
+            "DM another session by registered name or raw session ID. delivery: steer = interrupt the receiver now, queue = deliver on its next turn. dm_reply: true = the receiver must autonomously reply to you as a DM, false = no reply expected.",
           input: Schema.Struct({
             to: Schema.String,
             content: Schema.String,
             delivery: Schema.Literals(["steer", "queue"]),
+            dm_reply: Schema.Boolean,
           }),
           output: Schema.String,
           options: { codemode: false },
-          execute: ({ to, content, delivery }, { sessionID }) =>
+          execute: ({ to, content, delivery, dm_reply }, { sessionID }) =>
             readRoster.pipe(
               Effect.flatMap((roster) => {
                 const target = roster[to]?.id ?? (to as Session.ID)
@@ -91,12 +109,15 @@ export default Plugin.define({
                 return ctx.session
                   .prompt({
                     sessionID: target,
-                    text: `[DM from ${sender}] ${content}`,
-                    metadata: { from: sessionID, fromName: senderName ?? sessionID },
+                    text: `${DM_PREFIX}${sender}] ${content}`,
+                    metadata: { from: sessionID, fromName: senderName ?? sessionID, dm_reply },
                     delivery,
                   })
                   .pipe(
-                    Effect.map(() => ({ output: "delivered", content: `delivered to ${to} (${delivery})` })),
+                    Effect.map(() => ({
+                      output: "delivered",
+                      content: `delivered to ${to} (${delivery}, dm_reply: ${dm_reply})`,
+                    })),
                   )
               }),
               Effect.mapError(() => toolError(`delivery failed to ${to}`)),
